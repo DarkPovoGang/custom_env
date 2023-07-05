@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "deeprl"
+name = "custom_env"
 version = "0.1.0"
 description = ""
 authors = ["Mattia2700 <mattia2700franzin+dev@gmail.com>"]
