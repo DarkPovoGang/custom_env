@@ -174,11 +174,11 @@ class VisualGroundingEnv(gym.Env):
             #Get reward
             if action < Actions.ACT_TR:
               if (self.current_iou > self.iou):
-                reward = self.current_iou()
+                reward = self.current_iou
               else:
                 reward = -0.05
             else:
-              if self.current_iou() < 0.5:
+              if self.current_iou < 0.5:
                 reward = -1.0
               else:
                 reward = 1.0
