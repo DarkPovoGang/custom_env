@@ -3,7 +3,7 @@ from gym import spaces
 # import pygame
 import numpy as np
 import torchvision
-from env.dataset import RefCOCOg
+from custom_env.dataset import RefCOCOg
 
 from enum import Enum
 # class syntax
