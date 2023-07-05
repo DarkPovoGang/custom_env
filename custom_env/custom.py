@@ -161,31 +161,30 @@ class VisualGroundingEnv(gym.Env):
 
 
     def step(self, action):
-        def compute_reward(action):
-            terminated = False
-            reward = 0
-
-            self.current_iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)
-            print('iou : ',self.current_iou)
-
-            if self.current_iou > VisualGroundingEnv.CONVERGENCE_THRESHOLD: 
-                terminated = True
-            
-            #Get reward
-            if action < Actions.ACT_TR:
-              if (self.current_iou > self.iou):
+        # COMPUTE REWARD
+        self.current_iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)
+        # print('iou : ',self.current_iou)
+        # TODO: remove assert
+        assert self.x1 <= self.x2
+        assert self.y1 <= self.y2
+        if self.current_iou > VisualGroundingEnv.CONVERGENCE_THRESHOLD: 
+            terminated = True
+        # Get reward
+        if action < Actions.ACT_TR:
+            if (self.current_iou > self.iou):
                 reward = self.current_iou
-              else:
-                reward = -0.05
             else:
-              if self.current_iou < 0.5:
+                # pay penalty
+                reward = -0.05
+        else:
+            # speed up training
+            if self.current_iou < 0.5:
                 reward = -1.0
-              else:
+            else:
                 reward = 1.0
-            
-            assert reward != 0
-            self.iou = self.current_iou
-
+        
+        assert reward != 0
+        self.iou = self.current_iou
         
         # Map the action (element of {0,1,2,3}) to the direction we walk in
         self._agent_location = self._update_bbox(action)
@@ -193,8 +192,6 @@ class VisualGroundingEnv(gym.Env):
         # terminated = np.array_equal(self._agent_location, self._target_location) #TODO: or quite close
         print("tensors_shape: ", self._agent_location.shape)
         # compute IoU    
-
-        terminated, reward = compute_reward(action)
         
         observation = self._get_obs()
         info = self._get_info()
