@@ -65,8 +65,8 @@ class RefCOCOg(Dataset):
         # get bbox
         bboxes = self._get_bboxes(raw)
 
-        # return self._get_vector(image, sentences, bboxes)
-        return self._get_vector(image, sentences) , bboxes
+        # return self._get_vector bboxes and image width and height
+        return self._get_vector(image, sentences) , bboxes, image.width, image.height
 
     def _get_image(self, raw):
         # get image_id
