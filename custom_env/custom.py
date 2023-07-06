@@ -3,10 +3,13 @@ from gym import spaces
 # import pygame
 import numpy as np
 import torchvision
+import torch
 from custom_env.dataset import RefCOCOg
+from functools import total_ordering
 
 from enum import Enum
-# class syntax
+
+@total_ordering
 class Actions(Enum):
   ACT_RT = 0 #Right
   ACT_LT = 1 #Left
@@ -18,17 +21,20 @@ class Actions(Enum):
   ACT_TH = 7 #Thiner
   ACT_TR = 8 #Trigger
 
+  def __lt__(self, other):
+    if self.__class__ is other.__class__:
+      return self.value < other.value
+
 class VisualGroundingEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
     CONVERGENCE_THRESHOLD = 0.95
-    def __init__(self, width, height, split, move_factor=0.2, scale_factor=0.1, render_mode=None):
-        self.width = width  # The width of the image
-        self.height = height  # The height of the image
+    def __init__(self, split, move_factor=0.2, scale_factor=0.1, render_mode=None):
         # self.window_size = 512  # The size of the PyGame window
         self.move_factor = move_factor
         self.scale_factor = scale_factor
         self.dataset = RefCOCOg('.',split)
         self.idx = 0
+        _, _, self.width, self.height = self.dataset[self.idx]
         # Observations are dictionaries with the agent's and the target's location.
         # Each location is encoded as an element of {0, ..., `size`}^2, i.e. MultiDiscrete([size, size]).
         self.observation_space = spaces.Dict(
@@ -66,27 +72,33 @@ class VisualGroundingEnv(gym.Env):
     def _get_info(self):
         # return {"distance": np.linalg.norm(self._agent_location - self._target_location, ord=1)}
         # TODO: maybe return current history of movement
-        pass
+        return {"iou": self.iou}
 
-    def reset(self, true_bbox: np.array, seed=None, options=None):
+    def reset(self, seed=None, options=None):
         self.x1 = 0
         self.y1 = 0
-        self.bbox_width = self.width
-        self.bbox_height = self.height
 
         # We need the following line to seed self.np_random
-        super().reset(seed=seed)
+        self.np_random, seed = gym.utils.seeding.np_random(seed)
 
         # Choose the agent's location uniformly
-        self._agent_location = np.array([0,0, self.width, self.height])
+        self._agent_location = torch.tensor([[0, 0, self.width, self.height]], dtype=torch.float32)
 
         # We will sample the target's location randomly until it does not coincide with the agent's location
-        _, bbox = self.dataset[self.idx]
+        _, bbox, width, height = self.dataset[self.idx]
+        print("RESET: processing IMG with bbox: ",bbox )
         self.idx = self.idx + 1
-        self._target_location = bbox
+        bbox_x2 = bbox[0]+bbox[2]
+        bbox_y2 = bbox[1]+bbox[3]
+        self._target_location = torch.tensor([ [bbox[0],bbox[1],bbox_x2,bbox_y2 ] ], dtype=torch.float32)
+
+        self.width = width
+        self.height = height
+        self.bbox_width = self.width
+        self.bbox_height = self.height
         
-        self.current_iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)
-        self.iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)
+        self.current_iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)[0].item()
+        self.iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)[0].item()
 
         observation = self._get_obs()
         info = self._get_info()
@@ -101,15 +113,18 @@ class VisualGroundingEnv(gym.Env):
       BETA  = 0.1
       x2 = self.x1 + self.bbox_width
       y2 = self.y1 + self.bbox_height
-      assert action >= Actions.ACT_RT and action <= Actions.ACT_TR
-      self.action_history.append(action)
-
-      if action <= Actions.ACT_DN:
-        delta_w = int(ALPHA * self.bbox_width())
-        delta_h = int(ALPHA * self.bbox_height())
+      assert action >= Actions.ACT_RT.value and action <= Actions.ACT_TR.value
+      if not hasattr(self, 'action_history'):
+        self.action_history = torch.tensor([action])
       else:
-        delta_w = int(BETA * self.bbox_width())
-        delta_h = int(BETA * self.bbox_height())
+        self.action_history = torch.cat((self.action_history, torch.tensor([action])))
+
+      if action <= Actions.ACT_DN.value:
+        delta_w = int(ALPHA * self.bbox_width)
+        delta_h = int(ALPHA * self.bbox_height)
+      else:
+        delta_w = int(BETA * self.bbox_width)
+        delta_h = int(BETA * self.bbox_height)
 
       # PREVENT_STUCK:
       if (delta_h == 0):
@@ -117,81 +132,91 @@ class VisualGroundingEnv(gym.Env):
       if (delta_w == 0):
         delta_w = 1
 
+      # print(action)
+
       #Do the corresponding action to the window
-      if action == Actions.ACT_RT:
+      if action == Actions.ACT_RT.value:
         self.x1 += delta_w
         x2 += delta_w
-      elif action == Actions.ACT_LT:
+      elif action == Actions.ACT_LT.value:
         self.x1 -= delta_w
         x2 -= delta_w
-      elif action == Actions.ACT_UP:
+      elif action == Actions.ACT_UP.value:
         self.y1 -= delta_h
         y2 -= delta_h
-      elif action == Actions.ACT_DN:
+      elif action == Actions.ACT_DN.value:
         self.y1 += delta_h
         y2 += delta_h
-      elif action == Actions.ACT_TA:
+      elif action == Actions.ACT_TA.value:
         self.y1 -= delta_h
         y2 += delta_h
-      elif action == Actions.ACT_FA:
+      elif action == Actions.ACT_FA.value:
         self.x1 -= delta_w
         x2 += delta_w
-      elif action == Actions.ACT_SR:
+      elif action == Actions.ACT_SR.value:
         self.y1 += delta_h
         y2 -= delta_h
-      elif action == Actions.ACT_TH:
+      elif action == Actions.ACT_TH.value:
         self.x1 += delta_w
         x2 -= delta_w
-      elif action == Actions.ACT_TR:
+      elif action == Actions.ACT_TR.value:
         pass
       else:
-        raise NotImplemented
+        raise ValueError('Invalid action')
 
       # ensure bbox inside image
       if self.x1 < 0:
         self.x1 = 0
       if self.y1 < 0:
         self.y1 = 0
-      if self.x2 >= self.image_width:
-        self.x2 = self.image_width - 1
-      if self.y2 >= self.image_height:
-        self.y2 = self.image_height - 1
+      if x2 >= self.width:
+        x2 = self.width - 1
+      if y2 >= self.height:
+        y2 = self.height - 1
       # ret x,y,w,h
-      return  self.x1, self.y1, x2-self.x1, y2-self.y1
+      return torch.as_tensor([[self.x1, self.y1, x2, y2]], dtype=torch.float32)
 
 
     def step(self, action):
+        
+        terminated = False
+        reward = 0 
         # COMPUTE REWARD
-        self.current_iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)
+        # 0 <= x1 < x2 and 0 <= y1 < y2. 
+        # print(" agent: ", self._agent_location)
+        # print(" target: ", self._target_location)
+       
+        self.current_iou = torchvision.ops.box_iou(self._agent_location ,self._target_location)[0].item()
+        # print("current_iou: ",self.current_iou)
+        # print("------")
         # print('iou : ',self.current_iou)
-        # TODO: remove assert
-        assert self.x1 <= self.x2
-        assert self.y1 <= self.y2
-        if self.current_iou > VisualGroundingEnv.CONVERGENCE_THRESHOLD: 
-            terminated = True
-        # Get reward
-        if action < Actions.ACT_TR:
-            if (self.current_iou > self.iou):
-                reward = self.current_iou
-            else:
-                # pay penalty
-                reward = -0.05
+
+        # if self.current_iou > VisualGroundingEnv.CONVERGENCE_THRESHOLD: 
+        #     terminated = True
+        
+        #Get reward
+        if action < Actions.ACT_TR.value:
+          if self.current_iou > self.iou:
+            reward = self.current_iou
+          else:
+            reward = -0.05
         else:
-            # speed up training
-            if self.current_iou < 0.5:
-                reward = -1.0
-            else:
-                reward = 1.0
+          if self.current_iou < 0.5:
+            reward = -1.0
+          else:
+            reward = 1.0
         
         assert reward != 0
+        
         self.iou = self.current_iou
+        # print("current iou is ",self.current_iou)
+
         
         # Map the action (element of {0,1,2,3}) to the direction we walk in
         self._agent_location = self._update_bbox(action)
         # An episode is done iff the agent has reached the target
         # terminated = np.array_equal(self._agent_location, self._target_location) #TODO: or quite close
-        print("tensors_shape: ", self._agent_location.shape)
-        # compute IoU    
+        # print("tensors_shape: ", self._agent_location.shape)  
         
         observation = self._get_obs()
         info = self._get_info()
@@ -199,7 +224,7 @@ class VisualGroundingEnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        return observation, reward, terminated, False, info
+        return observation, reward, terminated, info
 
     def render(self):
         if self.render_mode == "rgb_array":
